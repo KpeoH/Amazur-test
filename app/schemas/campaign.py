@@ -77,7 +77,7 @@ class EvaluationLogResponse(BaseModel):
     id: uuid.UUID
     campaign_id: uuid.UUID
     triggered_rule: str | None = None
-    previous_targer: str
+    previous_target: str
     new_target: str
     context: dict
     created_at: datetime
