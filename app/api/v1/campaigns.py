@@ -39,9 +39,17 @@ async def create_campaign(
 
 @router.get("/", response_model=list[CampaignResponse])
 async def get_campaigns(
-    skip: int = 0, limit: int = 10, db: AsyncSession = Depends(get_db)
+    need_sync: bool = False,
+    skip: int = 0,
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db)
 ) -> Sequence[Campaign]:
-    query = select(Campaign).offset(skip).limit(limit)
+    query = select(Campaign)
+
+    if need_sync:
+        query = query.where(Campaign.current_status != Campaign.target_status)
+
+    query = query.offset(skip).limit(limit)
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -194,7 +202,9 @@ async def delete_schedule(
 
 @router.post("/{campaign_id}/evaluate", response_model=EvaluationResponse)
 async def evaluate_campaign(
-    campaign_id: UUID, db: AsyncSession = Depends(get_db)
+    campaign_id: UUID,
+    dry_run: bool = False,
+    db: AsyncSession = Depends(get_db)
 ) -> EvaluationResponse:
     campaign = await db.get(Campaign, campaign_id)
     if not campaign:
@@ -213,19 +223,23 @@ async def evaluate_campaign(
     evaluator = CampaignEvaluator()
     updated_campaign, rule_name, details = evaluator.evaluate(campaign)
 
-    log_entry = EvaluationLog(
-        campaign_id=campaign.id,
-        triggered_rule=rule_name,
-        previous_target=previous_target,
-        new_target=updated_campaign.target_status,
-        context=context_snapshot,
-    )
-
-    db.add(log_entry)
-    await db.commit()
+    calculated_status = updated_campaign.target_status
+    
+    if not dry_run:
+        log_entry = EvaluationLog(
+            campaign_id=campaign.id,
+            triggered_rule=rule_name,
+            previous_target=previous_target,
+            new_target=calculated_status,
+            context=context_snapshot,
+        )
+        db.add(log_entry)
+        await db.commit()
+    else:
+        campaign.target_status = previous_target
 
     return EvaluationResponse(
-        target_status=updated_campaign.target_status,
+        target_status=calculated_status,
         triggered_rule=rule_name,
         rule_details=details,
     )
